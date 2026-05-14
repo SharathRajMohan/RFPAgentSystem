@@ -49,36 +49,9 @@ class PDFService:
             raise PDFValidationError(f"Invalid PDF file: {str(e)}")
 
     @staticmethod
-    def extract_text(file_content: bytes) -> str:
-        """
-        Extract text from PDF while preserving layout.
-
-        Uses blocks layout to maintain document structure and formatting.
-
-        Args:
-            file_content: Raw PDF file bytes
-
-        Returns:
-            Extracted text with preserved layout
-        """
-        doc = fitz.open(stream=file_content, filetype="pdf")
-        text = ""
-
-        try:
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                text += page.get_text(
-                    "blocks",
-                    sort=True,
-                )
-                text += "\n---PAGE BREAK---\n"
-        finally:
-            doc.close()
-
-        return text
-
-    @staticmethod
-    def extract_markdown(file_content: bytes) -> str:
+    def process_pdf(
+        file_content: bytes
+    ) -> str:
         """
         Extract text from PDF as markdown while preserving layout.
 
@@ -94,32 +67,3 @@ class PDFService:
         doc = pymupdf4llm.to_markdown(raw_doc)
 
         return doc
-
-    @staticmethod
-    def process_pdf(
-        file_content: bytes,
-        filename: str,
-        format: str = "markdown"
-    ) -> str:
-        """
-        Process PDF file with validation and conversion.
-
-        Args:
-            file_content: Raw PDF file bytes
-            filename: Original filename
-            format: Output format ('text' or 'markdown')
-
-        Returns:
-            Extracted content in requested format
-
-        Raises:
-            PDFValidationError: If validation fails
-            ValueError: If format is unsupported
-        """
-
-        if format == "text":
-            return PDFService.extract_text(file_content)
-        elif format == "markdown":
-            return PDFService.extract_markdown(file_content)
-        else:
-            raise ValueError(f"Unsupported format: {format} for file-{filename}. Use 'text' or 'markdown'")

@@ -44,8 +44,9 @@
   - `GET /api/v1/health` — health check
   - Auto Swagger UI at `/docs`
 - `app/api/dependencies.py` — Dependency Injection
-  - OpenAI client singleton
-  - Lazy initialization
+  - OpenAI client singleton (`get_openai_client`)
+  - Model name from `OPENAI_MODEL` env var (`get_openai_model`, default: `gpt-5.2-chat-latest`)
+  - Lazy initialization via `lru_cache`
 
 ### Utilities
 - `app/utils/prompts.py` — LLM Configuration

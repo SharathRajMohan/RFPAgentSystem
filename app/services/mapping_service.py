@@ -4,6 +4,7 @@ from openai import OpenAI
 from app.models.rfp_extraction import ExtractedRFP
 from app.models.solution_mapping import SolutionMappingSet
 from app.utils.prompts import MAPPING_SYSTEM_PROMPT, MAPPING_USER_PROMPT, format_extracted_for_mapping, load_solution_definitions, format_solutions_for_prompt
+from app.api.dependencies import get_openai_model
 from dotenv import load_dotenv
 import os
 
@@ -32,7 +33,7 @@ class MappingService:
         user_prompt = MAPPING_USER_PROMPT.format(extracted_requirements=formatted_requirements)
 
         response = self.client.responses.parse(
-            model="gpt-5.2-chat-latest",
+            model=get_openai_model(),
             instructions=system_prompt,
             input=[
                 {"role": "user", "content": user_prompt},

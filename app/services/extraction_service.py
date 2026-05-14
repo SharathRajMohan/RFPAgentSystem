@@ -2,6 +2,7 @@ from typing import Optional
 from openai import OpenAI
 from app.models.rfp_extraction import ExtractedRFP
 from app.utils.prompts import EXTRACTION_USER_PROMPT, EXTRACTION_SYSTEM_PROMPT
+from app.api.dependencies import get_openai_model
 from loguru import logger
 
 class ExtractionService:
@@ -22,7 +23,7 @@ class ExtractionService:
         logger.debug(f"Prompt Ready")
 
         response = self.client.responses.parse(
-            model="gpt-5.2-chat-latest",
+            model=get_openai_model(),
             instructions=EXTRACTION_SYSTEM_PROMPT,
             input=[{"role": "user", "content": prompt}],
             text_format = ExtractedRFP,

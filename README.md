@@ -184,7 +184,7 @@ The mapping agent produces two correlated values per solution:
 ## Configuration
 
 ### LLM Settings
-- **Model**: `gpt-5.2-chat-latest` (configured in `extraction_service.py` and `mapping_service.py`)
+- **Model**: configurable via `OPENAI_MODEL` environment variable (default: `gpt-5.2-chat-latest`)
 - **API**: OpenAI Responses API (`client.responses.parse`) with structured output (`text_format`)
 
 ### Solution Catalog

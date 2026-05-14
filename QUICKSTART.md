@@ -75,10 +75,10 @@ check_setup.py        # Setup validator
 
 ## Configuration
 
-**Change LLM model** (search and replace in `extraction_service.py` and `mapping_service.py`):
-```python
-model="gpt-5.2-chat-latest"   # Current — best reasoning, large context
-model="gpt-4o"                 # Faster, lower cost
+**Change LLM model** — set `OPENAI_MODEL` in `.env` or as an environment variable:
+```bash
+OPENAI_MODEL=gpt-5.2-chat-latest   # Default — best reasoning, large context
+OPENAI_MODEL=gpt-4o                 # Faster, lower cost
 ```
 
 **Change solutions catalog**: Edit `solutions.json` — the mapper reads from it at startup.
@@ -122,6 +122,7 @@ If `validation.passed` is `false`, check:
 
 ```bash
 OPENAI_API_KEY          # Required: your OpenAI API key
+OPENAI_MODEL            # Optional: LLM model name (default: gpt-5.2-chat-latest)
 SOLUTIONS_JSON_PATH     # Optional: path to solutions catalog JSON (default: solutions.json)
 ```
 

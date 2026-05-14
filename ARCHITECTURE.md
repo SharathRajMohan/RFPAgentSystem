@@ -181,6 +181,7 @@
 │                                                                    │
 │  dependencies.py                                                  │
 │  • get_openai_client() — singleton OpenAI client                 │
+│  • get_openai_model() — model name from OPENAI_MODEL env var     │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -205,8 +206,8 @@
             │  • Typed domain models   │
             │                          │
             │  API: responses.parse    │
-            │  Model: gpt-5.2-chat-    │
-            │         latest           │
+            │  Model: via OPENAI_MODEL │
+            │         env var          │
             └──────────┬───────────────┘
                        │
                        ▼
