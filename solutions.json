@@ -1,0 +1,56 @@
+{
+    "Hybrid Multicloud Enablement": {
+        "description": "Enables enterprises to operate seamlessly across multiple cloud environments by leveraging private, high-performance interconnections.",
+        "key_features": [
+            "Private connectivity to hyperscale cloud providers",
+            "Reduced latency and improved application performance",
+            "Optimized cloud networking costs",
+            "Enhanced security through private architectures"
+        ]
+    },
+    "Digital Infrastructure Expansion": {
+        "description": "Focuses on enabling enterprises to scale their infrastructure footprint globally. Supports rapid deployment of compute and storage capacity.",
+        "key_features": [
+            "Global IBX data center footprint",
+            "Support for high-density and AI workloads",
+            "Scalable infrastructure deployment",
+            "High reliability and uptime"
+        ]
+    },
+    "Interconnection & Ecosystem": {
+        "description": "Leverages Equinix's dense ecosystem of partners, networks, and service providers to create powerful network effects.",
+        "key_features": [
+            "Direct partner and ecosystem connectivity",
+            "Reduced network hops and latency",
+            "Faster partner integration",
+            "Access to rich digital ecosystems"
+        ]
+    },
+    "Edge & Low-Latency Deployment": {
+        "description": "Deploys compute and networking capabilities closer to end users and data sources for real-time applications.",
+        "key_features": [
+            "Distributed edge infrastructure",
+            "Improved user experience for real-time applications",
+            "Reduced latency variability",
+            "Support for IoT, 5G, and streaming workloads"
+        ]
+    },
+    "Security & Resilience": {
+        "description": "Emphasizes building secure and resilient digital infrastructure to reduce threat exposure and ensure compliance.",
+        "key_features": [
+            "Reduced attack surface via private connectivity",
+            "Support for zero-trust architectures",
+            "High availability and redundancy",
+            "Improved compliance posture"
+        ]
+    },
+    "AI / High-Performance Compute": {
+        "description": "Supports AI and machine learning workloads by providing high-density, high-performance infrastructure.",
+        "key_features": [
+            "GPU-ready infrastructure",
+            "High power and cooling capacity",
+            "Proximity to data and cloud providers",
+            "Access to AI and partner ecosystems"
+        ]
+    }
+}
