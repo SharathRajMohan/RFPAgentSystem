@@ -2,8 +2,8 @@ import json
 from typing import List, Optional
 from openai import OpenAI
 from app.models.rfp_extraction import ExtractedRFP
-from app.models.solution_mapping import SolutionMapping
-from app.utils.prompts import MAPPING_PROMPT, format_extracted_for_mapping, load_solution_definitions, format_solutions_for_prompt
+from app.models.solution_mapping import SolutionMappingSet
+from app.utils.prompts import MAPPING_SYSTEM_PROMPT, MAPPING_USER_PROMPT, format_extracted_for_mapping, load_solution_definitions, format_solutions_for_prompt
 from dotenv import load_dotenv
 import os
 
@@ -14,8 +14,9 @@ class MappingService:
     def __init__(self, client: Optional[OpenAI] = None):
         self.client = client or OpenAI()
         self.solutions = load_solution_definitions(SOLUTIONS_JSON_PATH)
+        self.catalog_names = set(self.solutions.keys())
 
-    def map_to_solutions(self, extracted_rfp: ExtractedRFP) -> List[SolutionMapping]:
+    def map_to_solutions(self, extracted_rfp: ExtractedRFP) -> SolutionMappingSet:
         """
         Map extracted RFP requirements to Equinix solutions.
 
@@ -27,34 +28,18 @@ class MappingService:
         """
         formatted_requirements = format_extracted_for_mapping(extracted_rfp)
         formatted_solutions = format_solutions_for_prompt(self.solutions)
-        prompt = MAPPING_PROMPT.format(solutions_text =formatted_solutions ,extracted_requirements=formatted_requirements)
+        system_prompt = MAPPING_SYSTEM_PROMPT.format(solutions_text=formatted_solutions)
+        user_prompt = MAPPING_USER_PROMPT.format(extracted_requirements=formatted_requirements)
 
-        response = self.client.chat.completions.create(
+        response = self.client.responses.parse(
             model="gpt-5.2-chat-latest",
-            messages=[{"role": "user", "content": prompt}]
+            instructions=system_prompt,
+            input=[
+                {"role": "user", "content": user_prompt},
+            ],
+            text_format=SolutionMappingSet,
+            store=False
         )
 
-        content = response.choices[0].message.content
-        mappings_data = self._parse_json_response(content)
-
-        return [
-            SolutionMapping(
-                solution_name=mapping["solution_name"],
-                confidence_level=mapping["confidence_level"],
-                supporting_evidence=mapping["supporting_evidence"],
-                key_features_aligned=mapping["key_features_aligned"],
-            )
-            for mapping in mappings_data
-        ]
-
-
-    def _parse_json_response(self, content: str) -> list:
-        """Extract JSON array from LLM response."""
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            start = content.find("[")
-            end = content.rfind("]") + 1
-            if start >= 0 and end > start:
-                return json.loads(content[start:end])
-            raise ValueError("Could not parse JSON array from LLM response")
+        content = response.output_parsed
+        return content

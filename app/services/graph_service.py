@@ -1,9 +1,10 @@
-from typing import TypedDict
+from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, START, END
 from app.services.extraction_service import ExtractionService
 from app.services.mapping_service import MappingService
+from app.services.validation_service import ValidationService
 from app.models.rfp_extraction import ExtractedRFP
-from app.models.solution_mapping import RFPAnalysisResponse
+from app.models.solution_mapping import RFPAnalysisResponse, SolutionMappingSet, ValidationReport
 from datetime import datetime
 from openai import OpenAI
 from loguru import logger
@@ -13,8 +14,9 @@ class RFPProcessState(TypedDict):
     """State shared between graph nodes."""
 
     rfp_text: str
-    extracted_data: ExtractedRFP
-    solution_mappings: list
+    extracted_data: Optional[ExtractedRFP]
+    solution_mappings: Optional[SolutionMappingSet]
+    validation: Optional[ValidationReport]
 
 
 class RFPProcessGraph:
@@ -22,6 +24,7 @@ class RFPProcessGraph:
         self.client = client or OpenAI()
         self.extraction_service = ExtractionService(self.client)
         self.mapping_service = MappingService(self.client)
+        self.validation_service = ValidationService()
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -30,10 +33,12 @@ class RFPProcessGraph:
 
         graph.add_node("extract", self._extraction_node)
         graph.add_node("map", self._mapping_node)
+        graph.add_node("validate", self._validation_node)
 
         graph.add_edge(START, "extract")
         graph.add_edge("extract", "map")
-        graph.add_edge("map", END)
+        graph.add_edge("map", "validate")
+        graph.add_edge("validate", END)
 
         return graph.compile()
 
@@ -55,6 +60,22 @@ class RFPProcessGraph:
             **state,
             "solution_mappings": solution_mappings,
         }
+    
+    def _validation_node(self, state: RFPProcessState) -> RFPProcessState:
+        logger.debug("Validation node — checking grounding and catalog coverage")
+        validation = self.validation_service.validate(
+            mappings=state["solution_mappings"],
+            extracted_rfp=state["extracted_data"],
+            catalog_names=self.mapping_service.catalog_names,
+        )
+        if not validation.passed:
+            logger.warning(
+                f"Validation issues — "
+                f"grounding={len(validation.issues)}, "
+                f"missing_plays={validation.missing_catalog_plays}, "
+                f"unknown_plays={validation.unknown_catalog_plays}"
+            )
+        return {**state, "validation": validation}
 
     def process_rfp(self, rfp_text: str, rfp_id: str = None) -> RFPAnalysisResponse:
         """
@@ -70,14 +91,14 @@ class RFPProcessGraph:
         initial_state: RFPProcessState = {
             "rfp_text": rfp_text,
             "extracted_data": None,
-            "solution_mappings": [],
+            "solution_mappings": None,
+            "validation": None,
         }
 
         result = self.graph.invoke(initial_state)
 
         return RFPAnalysisResponse(
-            rfp_id=rfp_id,
             extracted_data=result["extracted_data"],
             solution_mappings=result["solution_mappings"],
-            analysis_timestamp=datetime.utcnow(),
+            validation=result["validation"]
         )
