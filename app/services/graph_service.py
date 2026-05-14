@@ -77,13 +77,12 @@ class RFPProcessGraph:
             )
         return {**state, "validation": validation}
 
-    def process_rfp(self, rfp_text: str, rfp_id: str = None) -> RFPAnalysisResponse:
+    def process_rfp(self, rfp_text: str) -> RFPAnalysisResponse:
         """
         Process RFP through the multi-agent workflow.
 
         Args:
             rfp_text: Raw RFP document text
-            rfp_id: Optional unique identifier for this RFP
 
         Returns:
             RFPAnalysisResponse: Complete analysis with extraction and solution mappings

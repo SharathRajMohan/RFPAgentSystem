@@ -89,6 +89,8 @@ export OPENAI_API_KEY="sk-your-api-key-here"
 **Or create a .env file in the project root:**
 ```
 OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-5.2-chat-latest
+SOLUTIONS_JSON_PATH=solutions.json
 ```
 
 ### Step 2: Install Dependencies
@@ -222,10 +224,10 @@ uv run python test_api.py
 ## Customization
 
 ### Change LLM Model
-Edit `app/services/extraction_service.py` and `app/services/mapping_service.py`:
-```python
-model="gpt-5.2-chat-latest"   # Current (best reasoning, large context)
-model="gpt-4o"                 # Faster, lower cost
+Set `OPENAI_MODEL` in your `.env` file or as an environment variable — no code changes needed:
+```bash
+OPENAI_MODEL=gpt-5.2-chat-latest   # Default (best reasoning, large context)
+OPENAI_MODEL=gpt-4o                 # Faster, lower cost
 ```
 
 ### Modify Solution Catalog
