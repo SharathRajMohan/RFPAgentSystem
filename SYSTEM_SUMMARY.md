@@ -1,151 +1,205 @@
-# 🎉 Multi-Agent RFP Analysis System - Complete
+# Multi-Agent RFP Analysis System - System Summary
 
-## ✅ What Was Built
+## What Was Built
 
-A production-ready **LangGraph multi-agent system** integrated with **FastAPI** to process RFPs and map them to Equinix infrastructure solutions.
+A production-ready **LangGraph multi-agent system** integrated with **FastAPI** to process PDF RFP documents, extract granular structured requirements, and map them to Equinix infrastructure solutions with signal-level evidence and deterministic validation.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 Equinix_DSCodeAlong/
 │
-├── app/                          # Main application package
-│   ├── __init__.py              # Package init with model exports
+├── app/                              # Main application package
+│   ├── __init__.py
 │   │
-│   ├── models/                  # Pydantic data models
-│   │   ├── __init__.py
-│   │   ├── rfp_extraction.py    # ExtractedRFP, CompanyInfo, TechnicalRequirements, etc.
-│   │   └── solution_mapping.py  # SolutionMapping, RFPAnalysisResponse
+│   ├── models/                       # Pydantic data models
+│   │   ├── rfp_extraction.py         # Enums, sub-models, ExtractedRFP
+│   │   └── solution_mapping.py       # SignalAssessment, SolutionMappingSet, ValidationReport
 │   │
-│   ├── services/                # Core business logic
-│   │   ├── __init__.py
-│   │   ├── extraction_service.py    # Agent 1: RFP extraction using GPT-4
-│   │   ├── mapping_service.py       # Agent 2: Solution mapping
-│   │   └── graph_service.py         # LangGraph orchestration (sequential workflow)
+│   ├── services/                     # Core business logic
+│   │   ├── extraction_service.py     # Agent 1: RFP extraction (Responses API)
+│   │   ├── mapping_service.py        # Agent 2: Signal-based solution mapping
+│   │   ├── validation_service.py     # Agent 3: Grounding + coverage validation (no LLM)
+│   │   ├── pdf_service.py            # PDF validation and text extraction
+│   │   └── graph_service.py          # LangGraph orchestration (extract→map→validate)
 │   │
-│   ├── api/                     # FastAPI REST API
-│   │   ├── __init__.py
-│   │   ├── routes.py            # POST /api/v1/analyze endpoint
-│   │   └── dependencies.py      # Dependency injection (OpenAI client)
+│   ├── api/                          # FastAPI REST API
+│   │   ├── routes.py                 # POST /api/v1/analyze-pdf endpoint
+│   │   └── dependencies.py           # Dependency injection (OpenAI client)
 │   │
-│   └── utils/                   # Utilities
-│       ├── __init__.py
-│       └── prompts.py           # LLM prompts & solution definitions
+│   └── utils/                        # Utilities
+│       └── prompts.py                # LLM prompts & solution catalog formatting
 │
-├── main.py                      # FastAPI application entry point
-├── test_api.py                  # API test suite with sample RFP
-├── check_setup.py               # Dependency & configuration checker
+├── main.py                           # FastAPI application entry point
+├── solutions.json                    # Equinix catalog (6 sales plays)
+├── test_api.py                       # API test suite
+├── check_setup.py                    # Dependency & configuration checker
 │
-├── README.md                    # Full API documentation
-├── DEPLOYMENT.md                # Deployment & customization guide
+├── README.md                         # Full API documentation
+├── ARCHITECTURE.md                   # Architecture diagrams and data flow
+├── SYSTEM_SUMMARY.md                 # This file
+├── DEPLOYMENT.md                     # Deployment & customization guide
+├── QUICKSTART.md                     # Quick reference card
+├── DELIVERY_CHECKLIST.md             # Implementation checklist
 │
-├── pyproject.toml              # Project dependencies (FastAPI, OpenAI, LangGraph, Pydantic, Uvicorn)
-└── uv.lock                     # Locked dependency versions
+├── Dataset/                          # Sample RFP PDFs for testing
+├── pyproject.toml                    # Project dependencies
+└── uv.lock                           # Locked dependency versions
 ```
 
 ---
 
-## 🤖 Agent Pipeline
+## Agent Pipeline
 
-### **Agent 1: Extraction Agent** 
-**Location**: `app/services/extraction_service.py`
+### Agent 1: Extraction Agent
+**Location**: [app/services/extraction_service.py](app/services/extraction_service.py)
 
 ```python
 ExtractionService.extract_rfp_info(rfp_text: str) -> ExtractedRFP
 ```
 
 **What it does:**
-- Parses raw RFP documents using GPT-4
-- Extracts structured data:
-  - Company profile (name, industry, size, HQ)
-  - Technical requirements (compute, storage, networking, workloads)
-  - Security/compliance needs (standards, encryption, threat model, zero-trust)
-  - Operational constraints (budget, timeline, SLAs, regions, DR)
-- Returns validated Pydantic model
-
-**Prompt**: Instructs GPT-4 to extract specific fields with exact requirements
+- Calls the OpenAI Responses API (`client.responses.parse`) with a detailed system prompt
+- Extracts a rich, typed `ExtractedRFP` object:
+  - Company profile (`CompanyInfo`, `IssuerType` enum)
+  - Administrative details (deadlines, contract term, contact)
+  - Workload profile (use case, listed equipment, high-density flag)
+  - Domain sub-models: `PowerSpec`, `CoolingSpec`, `NetworkSpec`, `PhysicalSecuritySpec`, `ResiliencySpec`, `OperationsSpec`
+  - **Granular `Requirement` list** — every distinct ask as a REQ-NNN object with theme, priority, quantitative value, and verbatim source
+  - Evaluation criteria with weights; mandatory pass/fail items
+- Uses `text_format=ExtractedRFP` so the LLM output is parsed into a Pydantic model directly
 
 ---
 
-### **Agent 2: Solution Mapper Agent**
-**Location**: `app/services/mapping_service.py`
+### Agent 2: Mapping Agent
+**Location**: [app/services/mapping_service.py](app/services/mapping_service.py)
 
 ```python
-MappingService.map_to_solutions(extracted_rfp: ExtractedRFP) -> List[SolutionMapping]
+MappingService.map_to_solutions(extracted_rfp: ExtractedRFP) -> SolutionMappingSet
 ```
 
 **What it does:**
-- Takes structured RFP data from Agent 1
-- Matches against 6 Equinix solutions:
-  1. Hybrid Multicloud Enablement
-  2. Digital Infrastructure Expansion
-  3. Interconnection & Ecosystem
-  4. Edge & Low-Latency Deployment
-  5. Security & Resilience
-  6. AI / High-Performance Compute
-- Generates confidence scores (0.0-1.0)
-- Provides supporting evidence from RFP
-- Filters to solutions with >0.5 confidence
-
-**Prompt**: Provides solution definitions and instructs GPT-4 to match requirements
+- Serializes the `ExtractedRFP` as JSON and injects it into the mapping prompt
+- Calls OpenAI Responses API with `text_format=SolutionMappingSet`
+- For each of the 6 catalog plays, the model:
+  1. Walks each signal-statement (MET / PARTIAL / NOT_MET), citing REQ IDs as evidence
+  2. Identifies counter-evidence (RFP facts arguing against this play)
+  3. Assigns a `Confidence` label (HIGH/MEDIUM/LOW/NONE) per rubric
+  4. Produces a numeric `score` in `[0, 1]` consistent with the confidence tier
+  5. Writes a 2–3 sentence rationale
+- Returns a `SolutionMappingSet` containing all 6 plays in catalog order
 
 ---
 
-### **Orchestrator: LangGraph Workflow**
-**Location**: `app/services/graph_service.py`
+### Agent 3: Validation Node
+**Location**: [app/services/validation_service.py](app/services/validation_service.py)
 
 ```python
-RFPProcessGraph.process_rfp(rfp_text: str) -> RFPAnalysisResponse
+ValidationService.validate(
+    mappings: SolutionMappingSet,
+    extracted_rfp: ExtractedRFP,
+    catalog_names: set[str]
+) -> ValidationReport
+```
+
+**What it does (no LLM call):**
+- **Grounding check**: Every REQ-xxx ID cited in `signal_assessments` must exist in `extracted_rfp.requirements`. Violations are recorded as `GroundingIssue` objects.
+- **Coverage check**: Every play in the catalog must appear exactly once. Missing and unknown plays are recorded separately.
+- Returns `ValidationReport(passed, issues, missing_catalog_plays, unknown_catalog_plays)`
+
+---
+
+### Orchestrator: LangGraph Workflow
+**Location**: [app/services/graph_service.py](app/services/graph_service.py)
+
+```python
+RFPProcessGraph.process_rfp(rfp_text: str, rfp_id: str = None) -> RFPAnalysisResponse
 ```
 
 **Workflow:**
 ```
 RFP Text
    ↓
-[extraction_node] → Extraction Agent
+[extract node] → ExtractionService → ExtractedRFP
    ↓
-[mapping_node] → Solution Mapper Agent
+[map node]     → MappingService    → SolutionMappingSet
    ↓
-RFPAnalysisResponse (extracted data + solution mappings)
+[validate node] → ValidationService → ValidationReport
+   ↓
+RFPAnalysisResponse
+```
+
+**State** (`RFPProcessState` TypedDict):
+```python
+{
+    "rfp_text": str,
+    "extracted_data": Optional[ExtractedRFP],
+    "solution_mappings": Optional[SolutionMappingSet],
+    "validation": Optional[ValidationReport],
+}
 ```
 
 ---
 
-## 🔌 REST API
+## REST API
 
-### Main Endpoint: `POST /api/v1/analyze`
+### Main Endpoint: `POST /api/v1/analyze-pdf`
 
-**Request:**
-```json
-{
-  "rfp_text": "Full RFP document text...",
-  "rfp_id": "optional-unique-id"
-}
-```
+**Request (multipart/form-data):**
+- `file`: PDF file (required, max 10MB)
+- `format`: `"text"` or `"markdown"` (optional)
+- `rfp_id`: unique identifier (optional, auto-generated if omitted)
 
 **Response:**
 ```json
 {
-  "rfp_id": "unique-id",
   "extracted_data": {
-    "company_info": { ... },
-    "technical_requirements": { ... },
-    "security_requirements": { ... },
-    "operational_constraints": { ... },
-    "raw_summary": "..."
+    "rfp_id": "my-rfp-001",
+    "company_info": { "name": "...", "issuer_type": "higher_education" },
+    "administrative": { "rfp_title": "...", "submission_deadline": "..." },
+    "workload": { "use_case": "...", "listed_equipment": [] },
+    "power": { "total_kw": 35.0, "redundancy_level": "N+1" },
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "theme": "power",
+        "description": "...",
+        "priority": "mandatory",
+        "quantitative_value": "35 kW",
+        "source": { "page": 4, "excerpt": "The facility shall provide..." }
+      }
+    ],
+    "evaluation_criteria": [
+      { "category": "Location", "weight_pct": 20.0 }
+    ]
   },
-  "solution_mappings": [
-    {
-      "solution_name": "Security & Resilience",
-      "confidence_score": 0.92,
-      "supporting_evidence": "...",
-      "key_features_aligned": [...]
-    },
-    ...
-  ],
-  "analysis_timestamp": "2026-05-13T..."
+  "solution_mappings": {
+    "mappings": [
+      {
+        "solution_name": "Security & Resilience",
+        "signal_assessments": [
+          {
+            "signal": "Customer requires compliance certifications...",
+            "status": "MET",
+            "requirement_ids": ["REQ-012", "REQ-013"]
+          }
+        ],
+        "counter_evidence": null,
+        "confidence": "HIGH",
+        "score": 0.88,
+        "rationale": "Two mandatory compliance requirements..."
+      }
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "missing_catalog_plays": [],
+    "unknown_catalog_plays": []
+  },
+  "analysis_timestamp": "2026-05-15T10:30:45.123456+00:00"
 }
 ```
 
@@ -156,158 +210,72 @@ RFPAnalysisResponse (extracted data + solution mappings)
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Purpose | Version |
 |-----------|---------|---------|
-| **LangGraph** | Multi-agent orchestration | 1.2.0 |
+| **LangGraph** | Three-node multi-agent orchestration | 1.2.0+ |
 | **FastAPI** | REST API framework | ≥0.136.1 |
-| **OpenAI** | GPT-4 LLM integration | ≥2.36.0 |
-| **Pydantic** | Data validation | ≥2.13.4 |
+| **OpenAI** | GPT-5 via Responses API | ≥2.36.0 |
+| **Pydantic v2** | Data validation with cross-field validators | ≥2.13.4 |
+| **PyMuPDF** | PDF text extraction with page markers | ≥1.27.2 |
 | **Uvicorn** | ASGI server | ≥0.46.0 |
 | **Python** | Runtime | ≥3.13 |
 
 ---
 
-## 📊 Data Models
+## Data Models Summary
 
-### RFP Extraction Models
-- `CompanyInfo` - Organization profile
-- `TechnicalRequirements` - Infrastructure needs
-- `SecurityRequirements` - Compliance/security constraints
-- `OperationalConstraints` - Business constraints
-- `ExtractedRFP` - Complete extracted data
+### Extraction Models (`rfp_extraction.py`)
 
-### Solution Mapping Models
-- `SolutionMapping` - Individual solution match with evidence
-- `RFPAnalysisResponse` - Complete analysis result
+| Model | Key Fields |
+|-------|-----------|
+| `Requirement` | `id` (REQ-NNN), `theme`, `priority`, `quantitative_value`, `source` |
+| `SourceSpan` | `page`, `excerpt` (verbatim quote) |
+| `ExtractedRFP` | `requirements[]`, domain sub-models, `evaluation_criteria`, `mandatory_requirements` |
+| `PowerSpec` | `total_kw`, `kw_per_cabinet`, `redundancy_level`, `generator_backup` |
+| `NetworkSpec` | `carrier_neutral_required`, `bgp_required`, `cloud_on_ramps_required[]` |
+| `PhysicalSecuritySpec` | Boolean flags for guards, biometrics, CCTV, person traps, etc. |
 
----
+### Mapping Models (`solution_mapping.py`)
 
-## 🚀 Getting Started
-
-### 1. Install Dependencies
-```bash
-uv sync
-```
-
-### 2. Set OpenAI API Key
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-### 3. Run Setup Check
-```bash
-uv run python check_setup.py
-```
-
-### 4. Start API Server
-```bash
-uv run python -m uvicorn main:app --reload
-```
-
-### 5. Test
-```bash
-# Visit Swagger UI
-http://localhost:8000/docs
-
-# Or run test suite
-uv run python test_api.py
-```
+| Model | Key Fields |
+|-------|-----------|
+| `SignalAssessment` | `signal`, `status` (MET/PARTIAL/NOT_MET), `requirement_ids[]` |
+| `SolutionMapping` | `solution_name`, `signal_assessments[]`, `counter_evidence`, `confidence`, `score`, `rationale` |
+| `SolutionMappingSet` | `mappings[]` — all 6 plays, unique names enforced |
+| `ValidationReport` | `passed`, `issues[]`, `missing_catalog_plays[]`, `unknown_catalog_plays[]` |
 
 ---
 
-## 🔑 Key Features
+## Key Features
 
-✅ **Two-Agent Pipeline**: Sequential workflow with clear data flow
-✅ **Type Safety**: Full Pydantic validation throughout
-✅ **LLM Orchestration**: LangGraph manages agent workflow
-✅ **Production Ready**: Error handling, CORS, health checks
-✅ **Auto Documentation**: Swagger UI at `/docs`
-✅ **Confidence Scoring**: Evidence-based solution matching
-✅ **Flexible**: Easy to customize agents and solutions
-
----
-
-## 📈 Example Analysis Flow
-
-**Input RFP:**
-```
-"ACME Corporation needs high-performance infrastructure with GPU support for AI workloads.
-Compliance: SOC2, HIPAA. Budget: $10M. Timeline: 6 months. Multi-region required.
-Disaster recovery: Active-active failover. Uptime: 99.99%"
-```
-
-**Agent 1 Output:**
-```json
-{
-  "company_info": {"name": "ACME Corporation", "industry": "Technology"},
-  "technical_requirements": {"compute_needs": "GPU infrastructure", "specific_workloads": ["AI training"]},
-  "security_requirements": {"compliance_standards": ["SOC2", "HIPAA"]},
-  "operational_constraints": {"budget_range": "$10M", "timeline": "6 months", "geographic_regions": ["multi-region"]}
-}
-```
-
-**Agent 2 Output:**
-```json
-[
-  {"solution_name": "AI / High-Performance Compute", "confidence_score": 0.96, "supporting_evidence": "GPU infrastructure and AI workloads explicitly mentioned"},
-  {"solution_name": "Security & Resilience", "confidence_score": 0.88, "supporting_evidence": "SOC2, HIPAA compliance and multi-region failover needed"},
-  {"solution_name": "Digital Infrastructure Expansion", "confidence_score": 0.71, "supporting_evidence": "Multi-region deployment required"}
-]
-```
+- **Three-Agent Pipeline**: Extract → Map → Validate with clear data boundaries
+- **Granular Requirement IDs**: Every RFP ask is a first-class REQ-NNN object; the mapper cites these IDs making every confidence score traceable
+- **Signal-Level Mapping**: Per-signal MET/PARTIAL/NOT_MET assessments prevent vague "overall fit" judgements
+- **Calibrated Confidence**: Rubric instructs the model to choose the lower tier when uncertain
+- **Deterministic Validation**: Grounding and catalog coverage checks run without an LLM call — instant, zero additional cost
+- **Source Provenance**: Every extracted field includes page number and verbatim excerpt
+- **Pydantic v2 Invariants**: Score/confidence consistency and REQ-ID format enforced at construction time
+- **OpenAI Responses API**: `responses.parse()` with `text_format` — no manual JSON parsing
 
 ---
 
-## 🎯 What's Next?
-
-1. **Set OpenAI API Key** - Required to run the system
-2. **Start Server** - `uv run python -m uvicorn main:app --reload`
-3. **Test with Sample RFPs** - Use the test suite or Swagger UI
-4. **Customize** - Add your own RFP samples and adjust confidence thresholds
-
----
-
-## 📝 Files Reference
+## Files Reference
 
 | File | Purpose |
 |------|---------|
-| `extraction_service.py` | RFP parsing & extraction logic |
-| `mapping_service.py` | Solution matching logic |
-| `graph_service.py` | LangGraph workflow orchestration |
+| `extraction_service.py` | RFP parsing & extraction (Agent 1) |
+| `mapping_service.py` | Signal-based solution scoring (Agent 2) |
+| `validation_service.py` | Grounding & coverage validation (Agent 3, no LLM) |
+| `graph_service.py` | LangGraph three-node workflow |
+| `pdf_service.py` | PDF validation and text extraction |
 | `routes.py` | FastAPI endpoint handlers |
 | `dependencies.py` | Dependency injection setup |
-| `rfp_extraction.py` | Pydantic models for RFP data |
-| `solution_mapping.py` | Pydantic models for solution results |
-| `prompts.py` | LLM prompts & solution definitions |
+| `rfp_extraction.py` | Pydantic models for extracted RFP data |
+| `solution_mapping.py` | Pydantic models for solution mappings and validation |
+| `prompts.py` | LLM prompts & solution catalog helpers |
+| `solutions.json` | Equinix catalog definitions (6 sales plays) |
 | `main.py` | FastAPI app setup |
 | `test_api.py` | API test suite |
 | `check_setup.py` | Setup validation script |
-
----
-
-## 🎓 Learning Resources
-
-- **LangGraph**: Sequential & parallel graph workflows
-- **FastAPI**: Modern async Python web framework
-- **Pydantic**: Type-safe data validation
-- **OpenAI API**: GPT-4 language model integration
-- **Multi-Agent Systems**: Orchestration patterns & state management
-
----
-
-## ✨ System Ready for Production
-
-The system is fully implemented and ready to:
-- ✅ Process RFP documents
-- ✅ Extract structured requirements
-- ✅ Map to appropriate solutions
-- ✅ Scale to multiple concurrent requests
-- ✅ Integrate with external systems
-- ✅ Deploy to cloud platforms
-
-**Just add your OpenAI API key and start running!**
-
----
-
-*Built with ❤️ using LangGraph, FastAPI, and OpenAI*

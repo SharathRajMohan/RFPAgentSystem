@@ -1,4 +1,4 @@
-# 🏗️ System Architecture
+# System Architecture
 
 ## High-Level Flow
 
@@ -8,8 +8,8 @@
 │  (Swagger UI, cURL, Python, Web Frontend, etc.)            │
 └──────────────────┬──────────────────────────────────────────┘
                    │
-                   │ POST /api/v1/analyze
-                   │ { "rfp_text": "..." }
+                   │ POST /api/v1/analyze-pdf
+                   │ multipart/form-data (PDF file)
                    ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    FastAPI Application                      │
@@ -18,9 +18,11 @@
                    │
                    ▼
          ┌─────────────────────┐
-         │  Route Handler      │
-         │  /api/v1/analyze    │
-         │  (routes.py)        │
+         │  PDF Service        │
+         │  (pdf_service.py)   │
+         │  Validate + Extract │
+         │  text with [Page N] │
+         │  markers            │
          └──────────┬──────────┘
                     │
                     ▼
@@ -31,61 +33,56 @@
          │  START                   │
          │    ▼                     │
          │  ┌────────────────┐      │
-         │  │ Extraction     │      │
-         │  │ Node           │      │
+         │  │ extract node   │      │
          │  └────┬───────────┘      │
          │       │                  │
          │       ▼                  │
          │  ┌────────────────┐      │
-         │  │ Mapping        │      │
-         │  │ Node           │      │
+         │  │ map node       │      │
          │  └────┬───────────┘      │
          │       │                  │
          │       ▼                  │
+         │  ┌────────────────┐      │
+         │  │ validate node  │      │
+         │  └────┬───────────┘      │
+         │       │                  │
          │  END                     │
          │                          │
          └──────────┬───────────────┘
                     │
-         ┌──────────┴──────────┐
-         │                     │
-         ▼                     ▼
-    ┌─────────────┐    ┌──────────────┐
-    │ Extraction  │    │    Mapping   │
-    │ Service     │    │    Service   │
-    │             │    │              │
-    │ • Parse RFP │    │ • Match      │
-    │ • Extract   │    │   solutions  │
-    │   data      │    │ • Score      │
-    │ • Validate  │    │   confidence │
-    └──────┬──────┘    └──────┬───────┘
-           │                   │
-           │ Uses GPT-4        │ Uses GPT-4
-           │                   │
-           └────┬──────────┬───┘
-                │          │
-                ▼          ▼
+         ┌──────────┼──────────────────┐
+         │          │                  │
+         ▼          ▼                  ▼
+    ┌─────────┐ ┌─────────┐  ┌──────────────────┐
+    │Extraction│ │Mapping  │  │Validation Service│
+    │Service  │ │Service  │  │(no LLM)          │
+    │         │ │         │  │                  │
+    │• Parse  │ │• Score  │  │• Grounding check │
+    │  RFP    │ │  each   │  │• Catalog coverage│
+    │• Build  │ │  play   │  │• Returns         │
+    │  REQ IDs│ │• Signal │  │  ValidationReport│
+    └──────┬──┘ │  assess.│  └──────────────────┘
+           │    └──────┬──┘
+           │ Uses GPT-5│ Uses GPT-5
+           └────┬──────┘
+                │
+                ▼
         ┌─────────────────────────┐
-        │    OpenAI API (GPT-4)    │
+        │  OpenAI Responses API   │
+        │  (responses.parse)      │
         │                         │
-        │ • Extracts structured   │
-        │   data from RFP         │
-        │ • Maps to solutions     │
-        │ • Generates scores      │
+        │ • Structured output via │
+        │   text_format=<Model>   │
+        │ • No manual JSON parse  │
         └────────────┬────────────┘
                      │
                      ▼
         ┌─────────────────────────┐
         │  RFPAnalysisResponse    │
-        │  JSON Response          │
-        └────────────┬────────────┘
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │    Response to Client   │
-        │  • Extracted data       │
-        │  • Solution mappings    │
-        │  • Confidence scores    │
-        │  • Evidence             │
+        │  • extracted_data       │
+        │  • solution_mappings    │
+        │  • validation           │
+        │  • analysis_timestamp   │
         └─────────────────────────┘
 ```
 
@@ -97,14 +94,30 @@
 ┌────────────────────────────────────────────────────────────────────┐
 │  MODELS (Data Validation & Type Safety)                           │
 │                                                                    │
-│  CompanyInfo ─────────────┐                                       │
-│                           ├─► ExtractedRFP ─────┐                │
-│  TechnicalRequirements ───┤                     │                │
-│                           ├─► SolutionMapping   ├─► RFPAnalysisResponse
-│  SecurityRequirements ────┤                     │                │
-│                           ├─► Confidence Scores │                │
-│  OperationalConstraints ──┘                     │                │
-│                                                 │                │
+│  Enums: Priority, RequirementTheme, RedundancyLevel, IssuerType   │
+│                                                                    │
+│  Extraction models:                                               │
+│  SourceSpan ──────────────────────────────────────────────────┐  │
+│  Requirement (REQ-001…) ──────────────────────────────────┐   │  │
+│  PowerSpec, CoolingSpec, NetworkSpec ─────────────────┐   │   │  │
+│  PhysicalSecuritySpec, ResiliencySpec, OperationsSpec ┤   │   │  │
+│  WorkloadProfile, GeographicConstraint ───────────────┤   ├───┤  │
+│  AdministrativeDetails, CompanyInfo ──────────────────┤   │   │  │
+│  EvaluationCriterion, MandatoryItem ──────────────────┘   │   │  │
+│                                                            ▼   ▼  │
+│                                                     ExtractedRFP  │
+│                                                            │      │
+│  Mapping models:                                           │      │
+│  Confidence (HIGH/MEDIUM/LOW/NONE) ────────────────┐      │      │
+│  SignalStatus (MET/PARTIAL/NOT_MET) ───────────────┤      │      │
+│  SignalAssessment (cites REQ IDs) ─────────────────┤      │      │
+│  SolutionMapping ──────────────────────────────────┤      │      │
+│  SolutionMappingSet ───────────────────────────────┘      │      │
+│                                                            │      │
+│  Validation models:                                        │      │
+│  GroundingIssue, ValidationReport ─────────────────────┐  │      │
+│                                                         │  │      │
+│                                              RFPAnalysisResponse  │
 └────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────┐
@@ -112,26 +125,35 @@
 │                                                                    │
 │  ExtractionService                                                │
 │  • extract_rfp_info(text) → ExtractedRFP                         │
-│  • Uses: GPT-4, EXTRACTION_PROMPT                                │
+│  • Uses: EXTRACTION_SYSTEM_PROMPT + EXTRACTION_USER_PROMPT       │
+│  • API: client.responses.parse(text_format=ExtractedRFP)         │
 │                                                                    │
 │  MappingService                                                   │
-│  • map_to_solutions(data) → List[SolutionMapping]               │
-│  • Uses: GPT-4, MAPPING_PROMPT, SOLUTION_DEFINITIONS            │
+│  • map_to_solutions(extracted_rfp) → SolutionMappingSet         │
+│  • Uses: MAPPING_SYSTEM_PROMPT + MAPPING_USER_PROMPT             │
+│  • API: client.responses.parse(text_format=SolutionMappingSet)   │
+│  • Exposes: catalog_names (set of valid play names)              │
+│                                                                    │
+│  ValidationService  (deterministic, no LLM)                      │
+│  • validate(mappings, extracted_rfp, catalog_names)              │
+│    → ValidationReport                                            │
+│  • Grounding: every cited REQ-xxx must exist in extraction       │
+│  • Coverage: every catalog play scored exactly once              │
 │                                                                    │
 │  RFPProcessGraph (LangGraph)                                      │
-│  • Orchestrates extraction_node and mapping_node                 │
-│  • Manages state between nodes                                    │
-│  • process_rfp() → RFPAnalysisResponse                           │
+│  • Nodes: extract → map → validate                               │
+│  • State: RFPProcessState (TypedDict)                            │
+│  • process_rfp(text, rfp_id) → RFPAnalysisResponse              │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────┐
 │  API LAYER (REST Endpoints)                                       │
 │                                                                    │
-│  POST /api/v1/analyze                                             │
-│  • Input: AnalyzeRequest (rfp_text, rfp_id)                      │
+│  POST /api/v1/analyze-pdf                                         │
+│  • Input: PDF file (multipart), format, rfp_id                   │
 │  • Output: RFPAnalysisResponse                                    │
-│  • Uses: RFPProcessGraph, OpenAI client                           │
+│  • Uses: PDFService, RFPProcessGraph, OpenAI client              │
 │                                                                    │
 │  GET /api/v1/health                                               │
 │  • Output: { "status": "healthy" }                                │
@@ -145,13 +167,20 @@
 │  UTILITIES & CONFIG                                               │
 │                                                                    │
 │  prompts.py                                                        │
-│  • EXTRACTION_PROMPT - Instructions for Agent 1                  │
-│  • MAPPING_PROMPT - Instructions for Agent 2                     │
-│  • SOLUTION_DEFINITIONS - 6 solution descriptions                 │
-│  • format_extracted_for_mapping() - Data formatting              │
+│  • EXTRACTION_SYSTEM_PROMPT — detailed extraction instructions   │
+│  • EXTRACTION_USER_PROMPT — user-turn template                   │
+│  • MAPPING_SYSTEM_PROMPT — signal rubric + catalog injection     │
+│  • MAPPING_USER_PROMPT — extracted JSON injection               │
+│  • format_extracted_for_mapping() — dumps ExtractedRFP as JSON  │
+│  • load_solution_definitions() — reads solutions.json            │
+│  • format_solutions_for_prompt() — formats catalog for prompt   │
+│                                                                    │
+│  solutions.json                                                   │
+│  • 6 Equinix sales plays with descriptions and key features      │
+│  • Path configurable via SOLUTIONS_JSON_PATH env var             │
 │                                                                    │
 │  dependencies.py                                                  │
-│  • get_openai_client() - Singleton OpenAI client                 │
+│  • get_openai_client() — singleton OpenAI client                 │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -161,84 +190,109 @@
 ## Data Flow Through Agents
 
 ```
-                    INPUT: RFP Text
+                    INPUT: PDF → Extracted Text (with [Page N] markers)
                           │
                           ▼
             ┌──────────────────────────┐
             │  AGENT 1: Extraction     │
-            │  Service                 │
+            │  (ExtractionService)     │
             │                          │
-            │  Prompt: "Extract from   │
-            │  RFP: company profile,   │
-            │  tech requirements,      │
-            │  security needs,         │
-            │  operational constraints"│
+            │  System prompt instructs │
+            │  precise extraction:     │
+            │  • One ask per REQ ID    │
+            │  • Verbatim source spans │
+            │  • No inference/guessing │
+            │  • Typed domain models   │
             │                          │
-            │  LLM: GPT-4             │
-            │  Temp: 0.3 (precise)    │
+            │  API: responses.parse    │
+            │  Model: gpt-5.2-chat-    │
+            │         latest           │
             └──────────┬───────────────┘
                        │
                        ▼
             ┌──────────────────────────┐
-            │  ExtractedRFP Object     │
+            │  ExtractedRFP            │
             │  • company_info          │
-            │  • tech_requirements     │
-            │  • security_requirements │
-            │  • operational_constraints
-            │  • raw_summary           │
+            │  • administrative        │
+            │  • workload              │
+            │  • power / cooling /     │
+            │    network / security /  │
+            │    resiliency / ops      │
+            │  • requirements[]        │
+            │    REQ-001 … REQ-N       │
+            │  • mandatory_requirements│
+            │  • evaluation_criteria   │
+            │  • notable_unique_reqs   │
             └──────────┬───────────────┘
-                       │
+                       │ (serialized to JSON)
                        ▼
             ┌──────────────────────────┐
             │  AGENT 2: Mapping        │
-            │  Service                 │
+            │  (MappingService)        │
             │                          │
-            │  Prompt: "Match          │
-            │  requirements to:        │
-            │  - Hybrid Multicloud     │
-            │  - Digital Expansion     │
-            │  - Interconnection       │
-            │  - Edge                  │
-            │  - Security              │
-            │  - AI/HPC                │
+            │  Scores all 6 plays:     │
+            │  For each signal:        │
+            │  • MET / PARTIAL /       │
+            │    NOT_MET              │
+            │  • cite REQ IDs          │
+            │  Then assigns:           │
+            │  • confidence label      │
+            │  • numeric score         │
+            │  • counter-evidence      │
+            │  • 2–3 sentence rationale│
             │                          │
-            │  LLM: GPT-4             │
-            │  Temp: 0.2 (analytical) │
+            │  API: responses.parse    │
             └──────────┬───────────────┘
                        │
                        ▼
             ┌──────────────────────────┐
-            │  List[SolutionMapping]   │
+            │  SolutionMappingSet      │
+            │  6 × SolutionMapping     │
             │  • solution_name         │
-            │  • confidence_score      │
-            │  • supporting_evidence   │
-            │  • key_features_aligned  │
-            │  (sorted by confidence)  │
+            │  • signal_assessments[]  │
+            │  • counter_evidence      │
+            │  • confidence (enum)     │
+            │  • score (float 0–1)     │
+            │  • rationale             │
+            └──────────┬───────────────┘
+                       │
+                       ▼
+            ┌──────────────────────────┐
+            │  AGENT 3: Validation     │
+            │  (ValidationService)     │
+            │  — No LLM call —         │
+            │                          │
+            │  Grounding check:        │
+            │  • Every cited REQ-xxx   │
+            │    exists in extraction  │
+            │                          │
+            │  Coverage check:         │
+            │  • Every catalog play    │
+            │    scored exactly once   │
+            │  • No invented plays     │
             └──────────┬───────────────┘
                        │
                        ▼
                 OUTPUT: RFPAnalysisResponse
                 • extracted_data
-                • solution_mappings
-                • analysis_timestamp
+                • solution_mappings (SolutionMappingSet)
+                • validation (ValidationReport)
+                • analysis_timestamp (UTC)
 ```
 
 ---
 
-## Request/Response Example
+## Request/Response Shape
 
 ```
 REQUEST
 ───────
-POST /api/v1/analyze
-Content-Type: application/json
+POST /api/v1/analyze-pdf
+Content-Type: multipart/form-data
 
-{
-  "rfp_text": "ACME Corp - Enterprise RFP. Needs: 1000+ CPU cores, 500TB storage, 
-  10Gbps network, SOC2/HIPAA compliance, 99.99% uptime, multi-region failover, 
-  GPU support for AI workloads. Budget: $5M/year. Timeline: 6 months.",
-  "rfp_id": "acme-2026-001"
-}
+file=<rfp.pdf>
+format=markdown          (optional)
+rfp_id=ccac-2026-001    (optional)
 
 
 RESPONSE
@@ -247,58 +301,61 @@ HTTP/1.1 200 OK
 Content-Type: application/json
 
 {
-  "rfp_id": "acme-2026-001",
   "extracted_data": {
-    "company_info": {
-      "name": "ACME Corp",
-      "industry": "Enterprise",
-      "size": "Enterprise",
-      "headquarters": null
+    "rfp_id": "ccac-2026-001",
+    "company_info": { "name": "CCAC", "issuer_type": "higher_education" },
+    "administrative": {
+      "rfp_title": "...",
+      "submission_deadline": "2026-06-15",
+      "contract_term": "5 years"
     },
-    "technical_requirements": {
-      "compute_needs": "1000+ CPU cores, GPU support",
-      "storage_capacity": "500TB storage",
-      "networking": "10Gbps network",
-      "performance_sla": "99.99% uptime",
-      "specific_workloads": ["AI workloads"]
+    "workload": {
+      "use_case": "production migration",
+      "listed_equipment": ["VMware hosts", "Palo Alto firewalls"],
+      "high_density_indicated": false
     },
-    "security_requirements": {
-      "compliance_standards": ["SOC2", "HIPAA"],
-      "data_residency": null,
-      "encryption_needs": null,
-      "threat_model": null,
-      "zero_trust": null
-    },
-    "operational_constraints": {
-      "budget_range": "$5M/year",
-      "timeline": "6 months",
-      "sla_uptime": "99.99%",
-      "geographic_regions": ["multi-region"],
-      "disaster_recovery": "Multi-region failover"
-    },
-    "raw_summary": "ACME Corp enterprise infrastructure..."
+    "power": { "total_kw": 35.0, "redundancy_level": "N+1" },
+    "network": { "carrier_neutral_required": true, "bgp_required": true },
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "theme": "power",
+        "description": "Facility must supply 35 kW of conditioned power",
+        "priority": "mandatory",
+        "quantitative_value": "35 kW",
+        "source": { "page": 4, "excerpt": "The colocation facility shall provide a minimum of 35 kW..." }
+      }
+    ],
+    "evaluation_criteria": [
+      { "category": "Location", "weight_pct": 20.0 },
+      { "category": "Power & Facility Infrastructure", "weight_pct": 25.0 }
+    ]
   },
-  "solution_mappings": [
-    {
-      "solution_name": "Security & Resilience",
-      "confidence_score": 0.94,
-      "supporting_evidence": "SOC2/HIPAA compliance and 99.99% uptime requirements",
-      "key_features_aligned": ["High availability and redundancy", "Improved compliance posture"]
-    },
-    {
-      "solution_name": "AI / High-Performance Compute",
-      "confidence_score": 0.91,
-      "supporting_evidence": "GPU support and high CPU core requirements for AI workloads",
-      "key_features_aligned": ["GPU-ready infrastructure", "High power and cooling capacity"]
-    },
-    {
-      "solution_name": "Digital Infrastructure Expansion",
-      "confidence_score": 0.78,
-      "supporting_evidence": "Multi-region deployment and high resource needs",
-      "key_features_aligned": ["Global IBX data center footprint", "Scalable infrastructure deployment"]
-    }
-  ],
-  "analysis_timestamp": "2026-05-13T22:30:45.123456"
+  "solution_mappings": {
+    "mappings": [
+      {
+        "solution_name": "Security & Resilience",
+        "signal_assessments": [
+          {
+            "signal": "Customer requires compliance certifications (SOC 2, HIPAA, PCI, etc.)",
+            "status": "MET",
+            "requirement_ids": ["REQ-012", "REQ-013"]
+          }
+        ],
+        "counter_evidence": null,
+        "confidence": "HIGH",
+        "score": 0.88,
+        "rationale": "Two mandatory compliance requirements (SOC 2 Type II, NDAA) are directly evidenced..."
+      }
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "missing_catalog_plays": [],
+    "unknown_catalog_plays": []
+  },
+  "analysis_timestamp": "2026-05-15T10:30:45.123456+00:00"
 }
 ```
 
@@ -318,16 +375,16 @@ Content-Type: application/json
     ┌────────┐ ┌────────┐ ┌────────┐
     │Instance│ │Instance│ │Instance│
     │  1     │ │  2     │ │  3     │
-    │        │ │        │ │        │
-    │FastAPI│ │FastAPI│ │FastAPI│
-    │Server │ │Server │ │Server │
+    │FastAPI │ │FastAPI │ │FastAPI │
+    │Server  │ │Server  │ │Server  │
     └───┬────┘ └───┬────┘ └───┬────┘
         │          │          │
         └──────────┼──────────┘
                    │
         ┌──────────▼──────────┐
-        │   OpenAI API (GPT-4)│
-        │   (External Service)│
+        │  OpenAI API (GPT-5) │
+        │  Responses API      │
+        │  (External Service) │
         └─────────────────────┘
 
 Optional Enhancements:
@@ -344,13 +401,13 @@ Optional Enhancements:
 ## Error Handling Flow
 
 ```
-                    Request
-                      │
-                      ▼
-            ┌──────────────────┐
-            │ Input Validation │
-            │ (Pydantic)       │
-            └──────┬───────────┘
+                    Request (PDF upload)
+                          │
+                          ▼
+            ┌──────────────────────┐
+            │  PDF Validation      │
+            │  (PDFService)        │
+            └──────┬───────────────┘
                    │
         ┌──────────┴──────────┐
         │ Valid?              │
@@ -358,31 +415,44 @@ Optional Enhancements:
     YES │                  NO │
         ▼                     ▼
     Continue            400 Bad Request
-                        • Invalid input
-                        • Missing field
-                        • Wrong type
+                        • Not a PDF
+                        • Exceeds 10MB
+                        • Corrupted file
 
                       │
                       ▼
-            ┌──────────────────┐
-            │ Extract & Map    │
-            │ (Agents)         │
-            └──────┬───────────┘
+            ┌──────────────────────┐
+            │ Extract + Map        │
+            │ (Agents 1 & 2)       │
+            └──────┬───────────────┘
                    │
         ┌──────────┴──────────┐
         │ Success?            │
         │                     │
     YES │                  NO │
         ▼                     ▼
-    200 OK              500 Internal Error
-    + Response          • LLM API error
-                        • JSON parse error
+   Continue            500 Internal Error
+                        • LLM API error
+                        • Pydantic parse error
                         • Timeout
                         • Missing API key
 
                       │
                       ▼
-                Response
+            ┌──────────────────────┐
+            │ Validate             │
+            │ (ValidationService)  │
+            └──────┬───────────────┘
+                   │
+                   │ Always returns
+                   │ (passed or not)
+                   ▼
+            ┌──────────────────────┐
+            │ 200 OK               │
+            │ RFPAnalysisResponse  │
+            │ validation.passed    │
+            │ may be false         │
+            └──────────────────────┘
 ```
 
 ---
@@ -392,40 +462,42 @@ Optional Enhancements:
 ```
 ┌─────────────────────────────────────────────────┐
 │  LangGraph                                      │
-│  • StateGraph for workflow definition            │
-│  • Nodes for discrete operations                 │
-│  • Sequential execution with state passing       │
+│  • StateGraph with TypedDict state              │
+│  • Three sequential nodes: extract→map→validate │
+│  • State passing between nodes                  │
 └─────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────┐
 │  FastAPI                                        │
 │  • Async request handling                       │
-│  • Dependency injection                         │
+│  • Dependency injection (OpenAI client)         │
 │  • Auto OpenAPI/Swagger documentation           │
 │  • CORS middleware                              │
 └─────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────┐
-│  OpenAI GPT-4                                   │
-│  • Extraction Agent: Parse & structure RFPs     │
-│  • Mapping Agent: Semantic matching             │
-│  • Confidence scoring                           │
+│  OpenAI Responses API (GPT-5)                   │
+│  • responses.parse() — structured output        │
+│  • text_format=<PydanticModel>                  │
+│  • Separate system/user prompts via             │
+│    instructions + input parameters              │
 └─────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────┐
-│  Pydantic                                       │
-│  • Type validation                              │
-│  • JSON serialization                           │
-│  • Auto documentation                           │
+│  Pydantic v2                                    │
+│  • Type validation with @field_validator        │
+│  • Cross-field invariants via @model_validator  │
+│  • Score/confidence consistency enforced        │
+│  • REQ-ID format enforced                       │
 └─────────────────────────────────────────────────┘
 ```
 
 ---
 
 This architecture enables:
-- ✅ Scalable multi-agent processing
-- ✅ Clear separation of concerns
-- ✅ Type-safe end-to-end data flow
-- ✅ Easy testing and debugging
-- ✅ Production-ready error handling
-- ✅ Future extensibility
+- Scalable multi-agent processing
+- Clear separation of concerns
+- Type-safe, traceable end-to-end data flow
+- Deterministic post-LLM validation without additional LLM cost
+- Production-ready error handling
+- Future extensibility

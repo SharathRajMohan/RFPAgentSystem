@@ -1,148 +1,139 @@
-# ✅ Project Delivery Checklist
+# Project Delivery Checklist
 
-## 🎯 Core Implementation
+## Core Implementation
 
 ### Data Models (Type Safety)
-- ✅ `app/models/rfp_extraction.py` - RFP data models
-  - CompanyInfo, TechnicalRequirements, SecurityRequirements, OperationalConstraints, ExtractedRFP
-- ✅ `app/models/solution_mapping.py` - Solution mapping models
-  - SolutionMapping, RFPAnalysisResponse
+- `app/models/rfp_extraction.py` — Extraction models
+  - Enums: `Priority`, `RequirementTheme`, `RedundancyLevel`, `IssuerType`
+  - Sub-models: `SourceSpan`, `Requirement`, `PowerSpec`, `CoolingSpec`, `NetworkSpec`, `PhysicalSecuritySpec`, `ResiliencySpec`, `OperationsSpec`, `WorkloadProfile`, `GeographicConstraint`
+  - Administrative models: `AdministrativeDetails`, `CompanyInfo`, `EvaluationCriterion`, `MandatoryItem`
+  - Root model: `ExtractedRFP`
+- `app/models/solution_mapping.py` — Mapping and validation models
+  - Enums: `Confidence` (HIGH/MEDIUM/LOW/NONE), `SignalStatus` (MET/PARTIAL/NOT_MET)
+  - `SignalAssessment` — with cross-field validators (REQ-ID format, status/evidence consistency)
+  - `SolutionMapping` — with score/confidence consistency validator
+  - `SolutionMappingSet` — uniqueness enforced across plays
+  - `GroundingIssue`, `ValidationReport`
+  - `RFPAnalysisResponse` — includes `validation` field
 
 ### Services (Business Logic)
-- ✅ `app/services/extraction_service.py` - Agent 1: RFP Extraction
-  - Parses RFP documents using GPT-4
-  - Returns structured ExtractedRFP object
-- ✅ `app/services/mapping_service.py` - Agent 2: Solution Mapping
-  - Maps requirements to 6 Equinix solutions
-  - Generates confidence scores and evidence
-- ✅ `app/services/graph_service.py` - LangGraph Orchestration
-  - Sequential workflow: extract → map
-  - State management and result aggregation
+- `app/services/extraction_service.py` — Agent 1: RFP Extraction
+  - Calls OpenAI Responses API (`client.responses.parse`) with `text_format=ExtractedRFP`
+  - Separate system (`EXTRACTION_SYSTEM_PROMPT`) and user (`EXTRACTION_USER_PROMPT`) prompts
+  - Returns parsed `ExtractedRFP` directly
+- `app/services/mapping_service.py` — Agent 2: Solution Mapping
+  - Scores all 6 catalog plays using signal-based rubric
+  - Calls `client.responses.parse` with `text_format=SolutionMappingSet`
+  - Exposes `catalog_names` set for validation
+  - Loads catalog from `solutions.json` (path configurable via `SOLUTIONS_JSON_PATH`)
+- `app/services/validation_service.py` — Agent 3: Validation (no LLM)
+  - Grounding check: every cited REQ-xxx ID must exist in the extraction
+  - Coverage check: every catalog play scored exactly once; no unknown plays
+  - Returns `ValidationReport(passed, issues, missing_catalog_plays, unknown_catalog_plays)`
+- `app/services/pdf_service.py` — PDF handling
+  - Validates PDF format, file size (10MB limit), and integrity
+  - Extracts text with `[Page N]` markers for source provenance
+- `app/services/graph_service.py` — LangGraph Orchestration
+  - Three sequential nodes: extract → map → validate
+  - Shared `RFPProcessState` TypedDict
+  - `process_rfp(text, rfp_id) → RFPAnalysisResponse`
 
 ### API Layer (REST Endpoints)
-- ✅ `app/api/routes.py` - FastAPI endpoints
-  - POST /api/v1/analyze (main analysis endpoint)
-  - GET /api/v1/health (health check)
-  - Auto Swagger UI at /docs
-- ✅ `app/api/dependencies.py` - Dependency Injection
+- `app/api/routes.py` — FastAPI endpoints
+  - `POST /api/v1/analyze-pdf` — PDF upload and analysis
+  - `GET /api/v1/health` — health check
+  - Auto Swagger UI at `/docs`
+- `app/api/dependencies.py` — Dependency Injection
   - OpenAI client singleton
   - Lazy initialization
 
 ### Utilities
-- ✅ `app/utils/prompts.py` - LLM Configuration
-  - EXTRACTION_PROMPT for Agent 1
-  - MAPPING_PROMPT for Agent 2
-  - LOADING SOLUTIONS FROM JSON
-  - helper functions for formatting and injecting into prompts dynamically
+- `app/utils/prompts.py` — LLM Configuration
+  - `EXTRACTION_SYSTEM_PROMPT` — detailed extraction instructions (precision, source provenance, theme/priority rules)
+  - `EXTRACTION_USER_PROMPT` — user-turn template
+  - `MAPPING_SYSTEM_PROMPT` — signal rubric + catalog injection
+  - `MAPPING_USER_PROMPT` — extracted JSON injection
+  - `format_extracted_for_mapping()` — dumps `ExtractedRFP` as JSON
+  - `load_solution_definitions()` — reads `solutions.json`
+  - `format_solutions_for_prompt()` — formats catalog for prompt
 
 ### Application Entry Point
-- ✅ `main.py` - FastAPI Application
+- `main.py` — FastAPI Application
   - CORS middleware enabled
   - Router integration
   - Ready for uvicorn
 
 ---
 
-## 📦 Project Configuration
+## Project Configuration
 
-- ✅ `pyproject.toml` - Updated with all dependencies
-  - fastapi, openai, pydantic, uvicorn, langgraph
-  - Proper Python version constraints
-- ✅ `uv.lock` - Locked dependency versions
-- ✅ `.gitignore` - Python standard ignores
-
----
-
-## 📚 Documentation (5 Files)
-
-1. ✅ **README.md** (7.7 KB)
-   - Full API documentation
-   - Setup instructions
-   - Architecture overview
-   - Scaling considerations
-   - Troubleshooting guide
-
-2. ✅ **DEPLOYMENT.md** (8.3 KB)
-   - Detailed setup steps
-   - Configuration options
-   - Environment requirements
-   - Customization guide
-   - Future enhancements
-
-3. ✅ **SYSTEM_SUMMARY.md** 
-   - Complete system overview
-   - Component breakdown
-   - Agent pipeline description
-   - Tech stack details
-   - Example analysis flow
-
-4. ✅ **ARCHITECTURE.md**
-   - High-level flow diagrams
-   - Component interaction diagrams
-   - Data flow visualization
-   - Deployment architecture
-   - Error handling flow
-
-5. ✅ **QUICKSTART.md**
-   - Quick reference card
-   - Common commands
-   - API endpoints summary
-   - Configuration tips
-   - Debugging guide
+- `pyproject.toml` — dependencies: fastapi, openai, pydantic, uvicorn, langgraph, pymupdf, loguru, python-dotenv
+- `uv.lock` — locked dependency versions
+- `solutions.json` — 6 Equinix catalog plays (configurable path)
+- `.gitignore` — Python standard ignores
 
 ---
 
-## 🧪 Testing & Validation
+## Documentation
 
-- ✅ `test_api.py` - API Test Suite
-  - Health check test
-  - Full RFP analysis test
-  - Sample RFP included
-  - Response validation
-- ✅ `check_setup.py` - Setup Validator
-  - Dependency verification
-  - API key validation
-  - Pre-flight checks
+1. **README.md** — Full API documentation, architecture overview, data models, confidence rubric, key design decisions, troubleshooting
+2. **DEPLOYMENT.md** — Detailed setup, configuration options, customization guide, batch processing example
+3. **SYSTEM_SUMMARY.md** — Complete system overview, agent pipeline breakdown, tech stack, data model reference
+4. **ARCHITECTURE.md** — High-level flow diagrams, component interaction, three-agent data flow, request/response shape, error handling
+5. **QUICKSTART.md** — Quick reference card, common commands, endpoints, debugging, environment variables
 
 ---
 
-## 📊 System Capabilities
+## Testing & Validation
+
+- `test_api.py` — API test suite (health check, PDF upload, response validation)
+- `check_setup.py` — dependency verification and API key pre-flight check
+- `Dataset/` — sample RFP PDFs for manual testing
+
+---
+
+## System Capabilities
 
 ### Agent 1: RFP Extraction
-- ✅ Parses company information (name, industry, size)
-- ✅ Extracts technical requirements (compute, storage, networking)
-- ✅ Identifies security/compliance needs
-- ✅ Documents operational constraints
-- ✅ Returns validated Pydantic model
+- Extracts granular `Requirement` objects with stable REQ-NNN IDs
+- Populates typed domain sub-models (power, cooling, network, security, resiliency, ops)
+- Captures evaluation criteria with weights and mandatory pass/fail items
+- Records verbatim source excerpts with page numbers for every field
+- Precision-first: null over inference — never fills in what the RFP didn't state
 
 ### Agent 2: Solution Mapping
-- ✅ Maps to 6 Equinix solutions dynamically from JSON
-- ✅ Generates confidence levels (High/Medium/Low)
-- ✅ Provides supporting evidence
-- ✅ Lists aligned features
+- Scores all 6 Equinix plays — no filtering by threshold
+- Signal-level assessments (MET/PARTIAL/NOT_MET) with cited REQ IDs
+- Counter-evidence captured alongside supporting evidence
+- Confidence label (HIGH/MEDIUM/LOW/NONE) + numeric score; rubric prefers calibrated underconfidence
+- 2–3 sentence rationale referencing signals and evaluation-criteria weights
+
+### Agent 3: Validation (new)
+- Grounding: flags hallucinated REQ IDs in mapper output
+- Coverage: flags missing or invented catalog plays
+- No LLM call — instant and zero additional API cost
+- Result included as `validation` field in `RFPAnalysisResponse`
 
 ### API Features
-- ✅ POST /api/v1/analyze-pdf endpoint
-- ✅ Input validation with Pydantic
-- ✅ JSON request/response
-- ✅ Error handling with HTTP status codes
-- ✅ Auto-generated Swagger documentation
-- ✅ CORS enabled for web clients
-- ✅ Health check endpoint
-- ✅ Dependency injection pattern
+- `POST /api/v1/analyze-pdf` — PDF upload (max 10MB)
+- Pydantic v2 validation with cross-field invariants
+- HTTP error responses with descriptive messages
+- Auto-generated Swagger documentation
+- CORS enabled
+- Health check endpoint
 
 ---
 
-## 🚀 Ready to Run
+## Ready to Run
 
 **Prerequisites:**
-- ✅ Python 3.13+
-- ✅ uv package manager
-- ✅ OpenAI API key (GPT-5 access)
+- Python 3.13+
+- `uv` package manager
+- OpenAI API key (GPT-5 access)
 
 **Quick Start:**
 ```bash
-export OPENAI_API_KEY="sk-..." # Or use the key provided in .env file
+export OPENAI_API_KEY="sk-..."   # or use the .env file
 uv sync
 uv run python -m uvicorn main:app --reload
 # Visit http://localhost:8000/docs
@@ -150,145 +141,40 @@ uv run python -m uvicorn main:app --reload
 
 ---
 
-## 🔧 What Was NOT Included (Optional Enhancements)
+## What Was NOT Included (Optional Enhancements)
 
-These are out of scope but documented for future work:
-- ❌ Database integration (PostgreSQL/MongoDB)
-- ❌ Result caching (Redis)
-- ❌ Batch processing endpoint
-- ❌ Async task queue (Celery)
-- ❌ Authentication/API keys
-- ❌ Rate limiting
-- ❌ Monitoring/metrics
-- ❌ Logging aggregation
-- ❌ Docker/K8s deployment files
-- ❌ Multi-language support
-
----
-
-## 📁 Complete File Listing
-
-```
-Equinix_DSCodeAlong/
-├── app/
-│   ├── __init__.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── dependencies.py
-│   │   └── routes.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── rfp_extraction.py
-│   │   └── solution_mapping.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── extraction_service.py
-│   │   ├── graph_service.py
-│   │   └── mapping_service.py
-│   └── utils/
-│       ├── __init__.py
-│       └── prompts.py
-├── main.py (23 lines)
-├── test_api.py (120 lines)
-├── check_setup.py (70 lines)
-├── pyproject.toml (UPDATED)
-├── uv.lock
-├── README.md
-├── DEPLOYMENT.md
-├── SYSTEM_SUMMARY.md
-├── ARCHITECTURE.md
-├── QUICKSTART.md
-└── ARCHITECTURE.md
-
-```
+Out of scope, documented for future work:
+- Database integration (PostgreSQL/MongoDB)
+- Result caching (Redis)
+- Batch processing endpoint
+- Async task queue (Celery)
+- Authentication / API keys
+- Rate limiting
+- Monitoring / metrics
+- Logging aggregation
+- Docker / K8s deployment files
+- Re-extraction loop on validation failure
 
 ---
 
-## ✨ Key Features Delivered
+## Performance Characteristics
 
-1. **Multi-Agent Architecture**
-   - ✅ Sequential workflow with state passing
-   - ✅ Independent agents for extensibility
-   - ✅ LangGraph orchestration
-
-2. **Type Safety**
-   - ✅ Full Pydantic validation
-   - ✅ Type hints throughout
-   - ✅ Auto-generated docs
-
-3. **Production Ready**
-   - ✅ Error handling
-   - ✅ CORS support
-   - ✅ Health checks
-   - ✅ Swagger UI
-
-4. **Flexible Solution Matching**
-   - ✅ 6 Equinix solutions loaded from a JSON file
-   - ✅ Confidence levels over random LLM based scoring
-   - ✅ Evidence extraction
-
-5. **Documentation**
-   - ✅ 5 comprehensive guides
-   - ✅ Architecture diagrams
-   - ✅ Quick reference
-   - ✅ Troubleshooting tips
+- **Extraction time**: ~3–5 seconds (GPT-5 API call)
+- **Mapping time**: ~3–5 seconds (GPT-5 API call, all 6 plays in one call)
+- **Validation time**: <50ms (deterministic, no LLM)
+- **Total analysis**: ~6–10 seconds per RFP
+- **Scaling**: horizontal via multiple instances behind a load balancer
 
 ---
 
-## 📈 Performance Characteristics
+## Next Steps for User
 
-- **Extraction Time**: ~3-5 seconds (GPT-5 API call)
-- **Mapping Time**: ~2-3 seconds (GPT-5 API call)
-- **Total Analysis**: ~5-8 seconds per RFP
-- **Throughput**: ~450-720 RFPs per hour (with single instance)
-- **Memory**: <500MB at idle
-- **Scaling**: Horizontal scaling via multiple instances
-
----
-
-## 🚀 Next Steps for User
-
-1. **Set OpenAI API Key**
-   ```bash
-   export OPENAI_API_KEY="sk-..."
-   ```
-   OR use the one provided in the .env file 
-
-   PS: I am sharing the .env file only to facilitate faster testing. I strongly do not recommend sharing credentials in the .env file as they are supposed to be confidential.
-
-
-2. **Verify Setup**
-   ```bash
-   uv run python check_setup.py
-   ```
-
-3. **Start Server**
-   ```bash
-   uv run python -m uvicorn main:app --reload
-   ```
-
-4. **Test API**
-   - Visit http://localhost:8000/docs
-   - Or run: `uv run python test_api.py`
-   - Or use curl/Python requests
-
-5. **Customize (Optional)**
-   - Change LLM model
-   - Add a custom solution definition to the solutions JSON
-   - Implement caching layer
+1. Set OpenAI API key (or use the provided `.env` file for testing only)
+2. `uv run python check_setup.py` — verify setup
+3. `uv run python -m uvicorn main:app --reload` — start server
+4. Visit `http://localhost:8000/docs` — test with sample PDFs from `Dataset/`
+5. Review `validation.passed` in responses to monitor mapping quality
 
 ---
 
-## 🎉 System Ready for Deployment
-
-**Status**: ✅ COMPLETE AND TESTED  
-**Quality**: Production-ready  
-**Documentation**: Comprehensive  
-**Extensibility**: High  
-**Performance**: Optimized for GPT-5 (Large Context Window)
-
-All requirements met. Ready to process RFPs! 🚀
-
----
-
-*Delivered: 2026-05-14*
+*Delivered: 2026-05-15*
